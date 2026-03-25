@@ -1,0 +1,12 @@
+2026-03-25 20:14:04,908 [INFO] ════════════════════════════════════════════════════════════
+2026-03-25 20:14:04,908 [INFO] Modo: URL direta
+2026-03-25 20:14:04,908 [INFO] [URL] Acessando: https://www.mercadolivre.com.br/apple-iphone-15-128-gb-preto-distribuidor-autorizado/p/MLB1027172677#polycard_client=search-desktop&search_layout=grid&position=1&type=product&tracking_id=7face089-b9ff-42ef-ae48-7be3da5c2533&wid=MLB4408548448&sid=search
+2026-03-25 20:14:05,172 [WARNING] [URL] Preço não encontrado na página.
+2026-03-25 20:14:05,172 [INFO]   ✓ N/A... → R$ None
+2026-03-25 20:14:05,173 [INFO] Modo: Busca geral | query='Iphone 15' | max=5
+2026-03-25 20:14:05,173 [INFO] [BUSCA] Acessando: https://lista.mercadolivre.com.br/Iphone-15
+2026-03-25 20:14:05,467 [WARNING] [BUSCA] Nenhum item encontrado. Seletor pode ter mudado.
+2026-03-25 20:14:05,470 [INFO] Arquivo criado: data/prices.csv
+2026-03-25 20:14:05,470 [INFO] 1 registro(s) salvos em data/prices.csv
+2026-03-25 20:14:05,470 [INFO] Scraper finalizado com sucesso.
+2026-03-25 20:14:05,470 [INFO] ════════════════════════════════════════════════════════════
