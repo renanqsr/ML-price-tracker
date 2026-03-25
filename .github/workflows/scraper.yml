@@ -1,0 +1,65 @@
+name: 🕷️ ML Price Scraper
+
+on:
+  schedule:
+    - cron: "0 12 * * *"   # Todo dia ao meio-dia (UTC) = 9h Brasília
+  workflow_dispatch:        # Permite rodar manualmente pela UI do GitHub
+
+jobs:
+  scrape:
+    name: Coletar preços
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write       # Necessário para fazer commit
+
+    steps:
+      # 1. Checkout do repositório
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. Configurar Python
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # 3. Instalar dependências
+      - name: 📦 Instalar dependências
+        run: pip install -r requirements.txt
+
+      # 4. Rodar o scraper
+      - name: 🔍 Rodar scraper
+        env:
+          SEARCH_QUERY: ${{ vars.SEARCH_QUERY }}   # Termo de busca geral (opcional)
+          PRODUCT_URL:  ${{ vars.PRODUCT_URL }}    # Link direto de produto (opcional)
+          MAX_RESULTS:  ${{ vars.MAX_RESULTS || '5' }}
+        run: python scraper.py
+
+      # 5. Commit e push caso haja dados novos
+      - name: 💾 Commit dos dados
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add data/prices.csv logs/scraper.log
+
+          # Só commita se houver mudanças
+          if git diff --cached --quiet; then
+            echo "Nenhuma mudança para commitar."
+          else
+            git commit -m "chore(data): preços coletados em $(date +'%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
+
+      # 6. Upload do log como artefato (útil para debug)
+      - name: 📋 Upload log
+        if: always()          # Roda mesmo se o scraper falhar
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-log-${{ github.run_number }}
+          path: logs/scraper.log
+          retention-days: 7
