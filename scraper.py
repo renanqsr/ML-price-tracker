@@ -45,7 +45,7 @@ def fetch_prices():
         soup = BeautifulSoup(resp.text, 'html.parser')
         
         # Seleciona os itens da lista
-        items = soup.find_all('li', class_='ui-search-layout__item', limit=MAX_RESULTS)
+        items = soup.find_all(['li', 'div'], class_='ui-search-result__wrapper', limit=MAX_RESULTS)
         
         results = []
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -82,18 +82,26 @@ def fetch_prices():
         return []
 
 def save_csv(records):
-    if not records:
-        return
+    # Garante que a pasta existe antes de qualquer coisa
+    os.makedirs(DATA_DIR, exist_ok=True)
     
     headers = ["timestamp", "product_id", "product", "price", "currency", "url"]
     file_exists = os.path.isfile(CSV_FILE)
 
     with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
+        
+        # Se o arquivo é novo, escreve o cabeçalho
         if not file_exists:
             writer.writeheader()
-        writer.writerows(records)
-    logger.info(f"Sucesso! {len(records)} registros salvos em data/prices.csv")
+            logger.info("Novo arquivo CSV criado com cabeçalhos.")
+        
+        # Escreve os dados se houver algum
+        if records:
+            writer.writerows(records)
+            logger.info(f"Sucesso! {len(records)} registros adicionados.")
+        else:
+            logger.warning("Nenhum registro encontrado para salvar, mas o arquivo foi mantido.")
 
 if __name__ == "__main__":
     data = fetch_prices()
