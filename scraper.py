@@ -1,5 +1,4 @@
 import requests
-from bs4 import BeautifulSoup
 import csv
 import os
 import logging
@@ -18,138 +17,103 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Configurações ─────────────────────────────────────────────────────────────
-SEARCH_QUERY  = os.getenv("SEARCH_QUERY", "")        # Termo de busca geral
-PRODUCT_URL   = os.getenv("PRODUCT_URL", "")         # Link direto de um produto
-MAX_RESULTS   = int(os.getenv("MAX_RESULTS", "5"))   # Só usado no modo busca
+CLIENT_ID     = os.getenv("ML_CLIENT_ID")
+CLIENT_SECRET = os.getenv("ML_CLIENT_SECRET")
+SEARCH_QUERY  = os.getenv("SEARCH_QUERY", "")       # Ex: "iphone 15"
+PRODUCT_ID    = os.getenv("PRODUCT_ID", "")          # Ex: "MLB1027172677"
+MAX_RESULTS   = int(os.getenv("MAX_RESULTS", "5"))
 CSV_FILE      = "data/prices.csv"
-CSV_HEADERS   = ["timestamp", "mode", "product", "price", "currency", "url"]
+CSV_HEADERS   = ["timestamp", "mode", "product_id", "product", "price", "currency", "url"]
+ML_API        = "https://api.mercadolibre.com"
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "pt-BR,pt;q=0.9",
-}
+
+# ── Autenticação ──────────────────────────────────────────────────────────────
+def get_access_token() -> str:
+    """Obtém o access token via Client Credentials."""
+    logger.info("Obtendo access token...")
+    resp = requests.post(
+        f"{ML_API}/oauth/token",
+        data={
+            "grant_type":    "client_credentials",
+            "client_id":     CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    token = resp.json().get("access_token")
+    if not token:
+        raise ValueError("Access token não retornado pela API.")
+    logger.info("Token obtido com sucesso.")
+    return token
 
 
 # ── Modo 1: Busca geral ───────────────────────────────────────────────────────
-def fetch_by_search(query: str, max_results: int) -> list[dict]:
-    """Busca os top N produtos no ML por termo de busca."""
-    url = f"https://lista.mercadolivre.com.br/{query.replace(' ', '-')}"
-    logger.info(f"[BUSCA] Acessando: {url}")
+def fetch_by_search(query: str, max_results: int, token: str) -> list[dict]:
+    """Busca produtos por termo e retorna os top N resultados."""
+    logger.info(f"[BUSCA] query='{query}' | max={max_results}")
+    resp = requests.get(
+        f"{ML_API}/sites/MLB/search",
+        params={"q": query, "limit": max_results},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    results_raw = resp.json().get("results", [])
 
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Falha na requisição (busca): {e}")
-        raise
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    items = soup.select("li.ui-search-layout__item")
-
-    if not items:
-        logger.warning("[BUSCA] Nenhum item encontrado. Seletor pode ter mudado.")
-        return []
-
-    results = []
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    records = []
 
-    for item in items[:max_results]:
-        try:
-            title_tag = item.select_one("h2.ui-search-item__title")
-            title = title_tag.get_text(strip=True) if title_tag else "N/A"
+    for item in results_raw:
+        title    = item.get("title", "N/A")
+        price    = item.get("price")
+        currency = item.get("currency_id", "BRL")
+        item_id  = item.get("id", "N/A")
+        url      = item.get("permalink", "N/A")
 
-            fraction  = item.select_one("span.andes-money-amount__fraction")
-            cents_tag = item.select_one("span.andes-money-amount__cents")
-            currency  = item.select_one("span.andes-money-amount__currency-symbol")
+        records.append({
+            "timestamp":  timestamp,
+            "mode":       "search",
+            "product_id": item_id,
+            "product":    title,
+            "price":      price,
+            "currency":   currency,
+            "url":        url,
+        })
+        logger.info(f"  ✓ [{item_id}] {title[:55]}... → {currency} {price}")
 
-            if fraction:
-                price_str = fraction.get_text(strip=True).replace(".", "")
-                if cents_tag:
-                    price_str += f".{cents_tag.get_text(strip=True)}"
-                price = float(price_str)
-            else:
-                price = None
-
-            currency_str = currency.get_text(strip=True) if currency else "R$"
-
-            link_tag = item.select_one("a.ui-search-item__group__element")
-            link = link_tag["href"].split("#")[0] if link_tag else "N/A"
-
-            results.append({
-                "timestamp": timestamp,
-                "mode":      "search",
-                "product":   title,
-                "price":     price,
-                "currency":  currency_str,
-                "url":       link,
-            })
-            logger.info(f"  ✓ {title[:60]}... → {currency_str} {price}")
-
-        except Exception as e:
-            logger.warning(f"Erro ao processar item da busca: {e}")
-            continue
-
-    return results
+    return records
 
 
-# ── Modo 2: Produto específico por URL ────────────────────────────────────────
-def fetch_by_url(product_url: str) -> list[dict]:
-    """Acessa a página de um produto específico e coleta o preço atual."""
-    logger.info(f"[URL] Acessando: {product_url}")
+# ── Modo 2: Produto específico por ID ─────────────────────────────────────────
+def fetch_by_id(product_id: str, token: str) -> list[dict]:
+    """Busca o preço atual de um produto específico pelo ID do ML."""
+    logger.info(f"[ID] Buscando produto: {product_id}")
+    resp = requests.get(
+        f"{ML_API}/items/{product_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    item = resp.json()
 
-    try:
-        response = requests.get(product_url, headers=HEADERS, timeout=15)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Falha na requisição (URL direta): {e}")
-        raise
-
-    soup = BeautifulSoup(response.text, "html.parser")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    title    = item.get("title", "N/A")
+    price    = item.get("price")
+    currency = item.get("currency_id", "BRL")
+    url      = item.get("permalink", "N/A")
 
-    try:
-        # Título do produto
-        title_tag = (
-            soup.select_one("h1.ui-pdp-title") or
-            soup.select_one("h1.item-title__primary") or
-            soup.select_one("h1")
-        )
-        title = title_tag.get_text(strip=True) if title_tag else "N/A"
+    logger.info(f"  ✓ [{product_id}] {title[:55]}... → {currency} {price}")
 
-        # Preço principal
-        fraction  = soup.select_one("span.andes-money-amount__fraction")
-        cents_tag = soup.select_one("span.andes-money-amount__cents")
-        currency  = soup.select_one("span.andes-money-amount__currency-symbol")
-
-        if fraction:
-            price_str = fraction.get_text(strip=True).replace(".", "")
-            if cents_tag:
-                price_str += f".{cents_tag.get_text(strip=True)}"
-            price = float(price_str)
-        else:
-            price = None
-            logger.warning("[URL] Preço não encontrado na página.")
-
-        currency_str = currency.get_text(strip=True) if currency else "R$"
-
-        logger.info(f"  ✓ {title[:60]}... → {currency_str} {price}")
-
-        return [{
-            "timestamp": timestamp,
-            "mode":      "url",
-            "product":   title,
-            "price":     price,
-            "currency":  currency_str,
-            "url":       product_url,
-        }]
-
-    except Exception as e:
-        logger.error(f"Erro ao extrair dados da página do produto: {e}")
-        raise
+    return [{
+        "timestamp":  timestamp,
+        "mode":       "id",
+        "product_id": product_id,
+        "product":    title,
+        "price":      price,
+        "currency":   currency,
+        "url":        url,
+    }]
 
 
 # ── Salvar CSV ────────────────────────────────────────────────────────────────
@@ -171,23 +135,20 @@ def save_to_csv(records: list[dict]) -> None:
 def main() -> None:
     logger.info("═" * 60)
 
+    if not CLIENT_ID or not CLIENT_SECRET:
+        raise ValueError("ML_CLIENT_ID e ML_CLIENT_SECRET são obrigatórios.")
+
+    if not SEARCH_QUERY and not PRODUCT_ID:
+        raise ValueError("Configure SEARCH_QUERY e/ou PRODUCT_ID nas variáveis.")
+
+    token = get_access_token()
     all_records = []
 
-    # Modo URL direta
-    if PRODUCT_URL:
-        logger.info(f"Modo: URL direta")
-        records = fetch_by_url(PRODUCT_URL)
-        all_records.extend(records)
+    if PRODUCT_ID:
+        all_records.extend(fetch_by_id(PRODUCT_ID, token))
 
-    # Modo busca geral
     if SEARCH_QUERY:
-        logger.info(f"Modo: Busca geral | query='{SEARCH_QUERY}' | max={MAX_RESULTS}")
-        records = fetch_by_search(SEARCH_QUERY, MAX_RESULTS)
-        all_records.extend(records)
-
-    if not PRODUCT_URL and not SEARCH_QUERY:
-        logger.error("Nenhuma variável configurada! Defina PRODUCT_URL e/ou SEARCH_QUERY.")
-        raise ValueError("PRODUCT_URL e SEARCH_QUERY estão vazios.")
+        all_records.extend(fetch_by_search(SEARCH_QUERY, MAX_RESULTS, token))
 
     if all_records:
         save_to_csv(all_records)

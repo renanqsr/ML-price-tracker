@@ -34,8 +34,10 @@ jobs:
       # 4. Rodar o scraper
       - name: 🔍 Rodar scraper
         env:
-          SEARCH_QUERY: ${{ vars.SEARCH_QUERY }}   # Termo de busca geral (opcional)
-          PRODUCT_URL:  ${{ vars.PRODUCT_URL }}    # Link direto de produto (opcional)
+          ML_CLIENT_ID:     ${{ secrets.ML_CLIENT_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          SEARCH_QUERY:     ${{ vars.SEARCH_QUERY }}
+          PRODUCT_ID:       ${{ vars.PRODUCT_ID }}      # ID do produto ML ex: MLB1234 (opcional)
           MAX_RESULTS:  ${{ vars.MAX_RESULTS || '5' }}
         run: python scraper.py
 
