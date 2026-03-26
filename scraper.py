@@ -37,6 +37,7 @@ HEADERS = {
 
 def fetch_prices():
     logger.info(f"Iniciando busca para: {SEARCH_QUERY}")
+    # Usamos a URL de busca direta
     url = f"https://lista.mercadolivre.com.br/{SEARCH_QUERY.replace(' ', '-')}"
     
     try:
@@ -44,38 +45,53 @@ def fetch_prices():
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, 'html.parser')
         
-        # Seleciona os itens da lista
-        items = soup.find_all(['li', 'div'], class_='ui-search-result__wrapper', limit=MAX_RESULTS)
+        # O ML costuma agrupar itens em 'li' com classes que começam com 'ui-search-layout__item'
+        items = soup.find_all(['li', 'div'], class_=lambda x: x and 'ui-search-layout__item' in x, limit=MAX_RESULTS)
         
+        # Se não achou nada, tenta um seletor mais genérico
+        if not items:
+            items = soup.select(".ui-search-result__wrapper", limit=MAX_RESULTS)
+
         results = []
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         for item in items:
             try:
-                # Título
-                title_tag = item.find(['h2', 'h3'])
+                # 1. Título (Geralmente em um h2 ou h3)
+                title_tag = item.find(['h2', 'h3'], class_=lambda x: x and 'title' in x)
+                if not title_tag:
+                    title_tag = item.find(['h2', 'h3'])
                 title = title_tag.text.strip() if title_tag else "N/A"
                 
-                # Preço (Pega a fração principal)
+                # 2. Preço (Procura pela classe 'fraction')
                 price_tag = item.find('span', class_='andes-money-amount__fraction')
                 price = price_tag.text.replace('.', '').strip() if price_tag else "0"
                 
-                # Link e ID
+                # 3. Link
                 link_tag = item.find('a', href=True)
                 link = link_tag['href'] if link_tag else "N/A"
-                prod_id = "MLB" + link.split('/MLB-')[1].split('-')[0] if "/MLB-" in link else "N/A"
+                
+                # 4. ID do Produto
+                prod_id = "N/A"
+                if "/MLB-" in link:
+                    prod_id = "MLB" + link.split('/MLB-')[1].split('-')[0]
 
-                results.append({
-                    "timestamp": timestamp,
-                    "product_id": prod_id,
-                    "product": title,
-                    "price": float(price) if price.isdigit() else 0.0,
-                    "currency": "BRL",
-                    "url": link
-                })
-                logger.info(f" ✓ Encontrado: {title[:30]}... R$ {price}")
-            except:
+                if title != "N/A":
+                    results.append({
+                        "timestamp": timestamp,
+                        "product_id": prod_id,
+                        "product": title,
+                        "price": float(price) if price.isdigit() else 0.0,
+                        "currency": "BRL",
+                        "url": link
+                    })
+                    logger.info(f" ✓ Encontrado: {title[:35]}... R$ {price}")
+            except Exception as e:
                 continue
+                
+        if not results:
+            logger.warning("A busca retornou itens, mas não conseguimos extrair os dados. O HTML pode ter mudado.")
+            
         return results
     except Exception as e:
         logger.error(f"Erro na requisição: {e}")
