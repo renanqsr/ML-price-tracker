@@ -10,6 +10,14 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR   = os.path.join(SCRIPT_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# Pega o caminho de onde o script está rodando
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+
+# CRIA A PASTA SE NÃO EXISTIR (Importante!)
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
 CSV_FILE   = os.path.join(DATA_DIR, "prices.csv")
 # Cabeçalhos fixos para o CSV não bagunçar
 CSV_HEADERS = ["timestamp", "product_id", "product", "price", "currency", "url"]
@@ -62,13 +70,16 @@ def fetch_prices(query, max_results):
         return []
 
 def save_to_csv(records):
+    os.makedirs(DATA_DIR, exist_ok=True) # Garante que a pasta existe
     file_exists = os.path.isfile(CSV_FILE)
+    
     with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
         if not file_exists:
             writer.writeheader()
-        writer.writerows(records)
-    logger.info(f"Salvo em: {CSV_FILE}")
+        if records: # Só escreve se tiver dados
+            writer.writerows(records)
+    logger.info("Arquivo CSV atualizado/verificado.")
 
 if __name__ == "__main__":
     data = fetch_prices(SEARCH_QUERY, MAX_RESULTS)

@@ -1,4 +1,4 @@
-name: 🕷️ ML Price Scraper
+name: ML Price Scraper
 
 on:
   schedule:
@@ -34,28 +34,24 @@ jobs:
       # 4. Rodar o scraper
       - name: 🔍 Rodar scraper
         env:
-          ML_CLIENT_ID:     ${{ secrets.ML_CLIENT_ID }}
-          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
-          SEARCH_QUERY:     ${{ vars.SEARCH_QUERY }}
-          PRODUCT_ID:       ${{ vars.PRODUCT_ID }}      # ID do produto ML ex: MLB1234 (opcional)
-          MAX_RESULTS:  ${{ vars.MAX_RESULTS || '5' }}
+          SEARCH_QUERY: "iphone 15 128gb"
+          MAX_RESULTS: "5"
         run: python scraper.py
 
       # 5. Commit e push caso haja dados novos
-      - name: 💾 Commit dos dados
+      - name: Commit and Push
         run: |
-          git config user.name  "github-actions[bot]"
+          git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add data/prices.csv logs/scraper.log
-
-          # Só commita se houver mudanças
-          if git diff --cached --quiet; then
-            echo "Nenhuma mudança para commitar."
-          else
-            git commit -m "chore(data): preços coletados em $(date +'%Y-%m-%d %H:%M UTC')"
-            git push
-          fi
+          
+          # Garante que as mudanças sejam rastreadas
+          git add data/prices.csv || echo "Arquivo não encontrado para adicionar"
+          
+          # Tenta o commit; o '|| exit 0' garante que não dê erro se não houver mudanças
+          git commit -m "chore(data): preços atualizados $(date +'%Y-%m-%d %H:%M')" || echo "Sem mudanças para salvar"
+          
+          # Empurra as mudanças de volta para o repositório
+          git push origin main || echo "Nada para dar push"
 
       # 6. Upload do log como artefato (útil para debug)
       - name: 📋 Upload log
