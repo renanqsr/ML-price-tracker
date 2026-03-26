@@ -2,8 +2,8 @@ name: ML Price Scraper
 
 on:
   schedule:
-    - cron: "0 12 * * *"   # Todo dia ao meio-dia (UTC) = 9h Brasília
-  workflow_dispatch:        # Permite rodar manualmente pela UI do GitHub
+    - cron: "0 12 * * *"   # Todo dia às 9h da manhã (Brasília)
+  workflow_dispatch:        # Botão para rodar manualmente
 
 jobs:
   scrape:
@@ -11,53 +11,51 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write       # Necessário para fazer commit
+      contents: write       # Permissão para o robô salvar o arquivo no seu GitHub
 
     steps:
-      # 1. Checkout do repositório
       - name: 📥 Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2. Configurar Python
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
 
-      # 3. Instalar dependências
       - name: 📦 Instalar dependências
-        run: pip install -r requirements.txt
+        run: |
+          pip install requests beautifulsoup4
 
-      # 4. Rodar o scraper
+      - name: 📁 Preparar ambiente
+        run: |
+          mkdir -p data logs
+          touch data/.gitkeep logs/.gitkeep
+
       - name: 🔍 Rodar scraper
-        env:
-          SEARCH_QUERY: "iphone 15 128gb"
-          MAX_RESULTS: "5"
         run: python scraper.py
 
-      # 5. Commit e push caso haja dados novos
-      - name: Commit and Push
+      - name: 🚀 Commit e Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Garante que as mudanças sejam rastreadas
-          git add data/prices.csv || echo "Arquivo não encontrado para adicionar"
-          
-          # Tenta o commit; o '|| exit 0' garante que não dê erro se não houver mudanças
-          git commit -m "chore(data): preços atualizados $(date +'%Y-%m-%d %H:%M')" || echo "Sem mudanças para salvar"
-          
-          # Empurra as mudanças de volta para o repositório
-          git push origin main || echo "Nada para dar push"
+          # Adiciona o CSV se ele existir
+          if [ -f data/prices.csv ]; then
+            git add data/prices.csv
+            # O '|| exit 0' evita que o erro pare o processo se não houver mudança nos preços
+            git commit -m "chore(data): preços atualizados $(date +'%Y-%m-%d %H:%M')" || echo "Sem mudanças"
+            git push origin main
+          else
+            echo "Erro: prices.csv não foi gerado pelo Python."
+            exit 1
+          fi
 
-      # 6. Upload do log como artefato (útil para debug)
-      - name: 📋 Upload log
-        if: always()          # Roda mesmo se o scraper falhar
+      - name: 📋 Guardar Log (Artefato)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: scraper-log-${{ github.run_number }}
           path: logs/scraper.log
-          retention-days: 7
+          retention-days: 5
