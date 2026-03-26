@@ -5,119 +5,97 @@ import logging
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-# 1. Configuração de Caminhos (Garante que as pastas existam)
+# Configuração de pastas
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 LOG_DIR  = os.path.join(BASE_DIR, "logs")
-
-# Cria as pastas se elas não existirem
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
 CSV_FILE = os.path.join(DATA_DIR, "prices.csv")
 LOG_FILE = os.path.join(LOG_DIR, "scraper.log")
 
-# 2. Configuração de Logs
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler(LOG_FILE, encoding="utf-8"), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
-# 3. Configurações de Busca
-SEARCH_QUERY = "iphone 15 128gb"
+# CONFIGURAÇÕES - Teste com uma busca simples
+SEARCH_QUERY = "iphone 15"
 MAX_RESULTS  = 5
+
+# User-Agent mais robusto para evitar bloqueio
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
 }
 
 def fetch_prices():
-    logger.info(f"Iniciando busca para: {SEARCH_QUERY}")
-    # Usamos a URL de busca direta
+    logger.info(f"Buscando: {SEARCH_QUERY}")
     url = f"https://lista.mercadolivre.com.br/{SEARCH_QUERY.replace(' ', '-')}"
     
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
+        resp = requests.get(url, headers=HEADERS, timeout=20)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, 'html.parser')
         
-        # O ML costuma agrupar itens em 'li' com classes que começam com 'ui-search-layout__item'
-        items = soup.find_all(['li', 'div'], class_=lambda x: x and 'ui-search-layout__item' in x, limit=MAX_RESULTS)
-        
-        # Se não achou nada, tenta um seletor mais genérico
+        # Tenta capturar os cards de produto (Seletores atualizados 2024/2025)
+        items = soup.select(".ui-search-result__wrapper", limit=MAX_RESULTS)
         if not items:
-            items = soup.select(".ui-search-result__wrapper", limit=MAX_RESULTS)
+            items = soup.find_all('li', class_='ui-search-layout__item', limit=MAX_RESULTS)
 
         results = []
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         for item in items:
             try:
-                # 1. Título (Geralmente em um h2 ou h3)
-                title_tag = item.find(['h2', 'h3'], class_=lambda x: x and 'title' in x)
-                if not title_tag:
-                    title_tag = item.find(['h2', 'h3'])
-                title = title_tag.text.strip() if title_tag else "N/A"
+                # Busca título
+                title_tag = item.select_one(".ui-search-item__title") or item.find(['h2', 'h3'])
+                title = title_tag.get_text(strip=True) if title_tag else "N/A"
                 
-                # 2. Preço (Procura pela classe 'fraction')
-                price_tag = item.find('span', class_='andes-money-amount__fraction')
-                price = price_tag.text.replace('.', '').strip() if price_tag else "0"
+                # Busca preço
+                price_tag = item.select_one(".andes-money-amount__fraction")
+                price = price_tag.get_text(strip=True).replace('.', '') if price_tag else "0"
                 
-                # 3. Link
+                # Busca Link
                 link_tag = item.find('a', href=True)
                 link = link_tag['href'] if link_tag else "N/A"
                 
-                # 4. ID do Produto
-                prod_id = "N/A"
-                if "/MLB-" in link:
-                    prod_id = "MLB" + link.split('/MLB-')[1].split('-')[0]
-
-                if title != "N/A":
+                if title != "N/A" and price != "0":
                     results.append({
                         "timestamp": timestamp,
-                        "product_id": prod_id,
+                        "product_id": "MLB" + link.split('/MLB-')[1].split('-')[0] if "/MLB-" in link else "N/A",
                         "product": title,
-                        "price": float(price) if price.isdigit() else 0.0,
+                        "price": float(price),
                         "currency": "BRL",
                         "url": link
                     })
-                    logger.info(f" ✓ Encontrado: {title[:35]}... R$ {price}")
+                    logger.info(f" ✓ {title[:30]}... R$ {price}")
             except Exception as e:
                 continue
-                
-        if not results:
-            logger.warning("A busca retornou itens, mas não conseguimos extrair os dados. O HTML pode ter mudado.")
-            
+        
         return results
     except Exception as e:
-        logger.error(f"Erro na requisição: {e}")
+        logger.error(f"Erro ao acessar ML: {e}")
         return []
 
 def save_csv(records):
-    # Garante que a pasta existe antes de qualquer coisa
-    os.makedirs(DATA_DIR, exist_ok=True)
-    
     headers = ["timestamp", "product_id", "product", "price", "currency", "url"]
     file_exists = os.path.isfile(CSV_FILE)
 
     with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
-        
-        # Se o arquivo é novo, escreve o cabeçalho
         if not file_exists:
             writer.writeheader()
-            logger.info("Novo arquivo CSV criado com cabeçalhos.")
         
-        # Escreve os dados se houver algum
         if records:
             writer.writerows(records)
-            logger.info(f"Sucesso! {len(records)} registros adicionados.")
+            logger.info(f"Dados gravados: {len(records)} itens.")
         else:
-            logger.warning("Nenhum registro encontrado para salvar, mas o arquivo foi mantido.")
+            # Força uma linha de log se não houver dados
+            logger.warning("Nenhum dado novo para gravar.")
 
 if __name__ == "__main__":
     data = fetch_prices()
